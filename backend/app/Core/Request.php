@@ -2,6 +2,8 @@
 namespace App\Core;
 
 class Request {
+    private array $attributes = [];
+
     public function method(): string { return $_SERVER['REQUEST_METHOD'] ?? 'GET'; }
     public function path(): string { return strtok($_SERVER['REQUEST_URI'] ?? '/', '?') ?: '/'; }
     public function input(): array { $raw=file_get_contents('php://input'); $json=json_decode($raw ?: '{}', true); return array_merge($_GET,$_POST,is_array($json)?$json:[]); }
@@ -11,4 +13,6 @@ class Request {
         if (!$h || !str_starts_with($h, 'Bearer ')) return null;
         return trim(substr($h, 7));
     }
+    public function setAttribute(string $key, mixed $value): void { $this->attributes[$key] = $value; }
+    public function attribute(string $key, mixed $default = null): mixed { return $this->attributes[$key] ?? $default; }
 }

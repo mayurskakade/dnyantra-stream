@@ -30,7 +30,7 @@ class AuthController {
     }
 
     public function me(Request $request): void {
-        $user = $this->auth->validateAccessToken($request->bearerToken());
+        $user = $request->attribute('auth_user') ?? $this->auth->validateAccessToken($request->bearerToken());
         if (!$user) { Response::json(['error'=>'Unauthorized'],401); return; }
         Response::json(['id'=>$user['id'],'role'=>$user['role']]);
     }
