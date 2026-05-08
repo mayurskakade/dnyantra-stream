@@ -17,13 +17,16 @@ class Router {
         foreach ($this->routes as [$m,$p,$h,$middlewares]) {
             if ($m===$request->method() && $p===$request->path()) {
                 foreach ($middlewares as $mw) {
-                    $ok = $mw($request);
-                    if (!$ok) {
-                        Response::json(['error' => 'Unauthorized'], 401);
+                    $result = $mw($request);
+                    if ($result !== true) {
+                        $status = is_array($result) ? (int)($result['status'] ?? 401) : 401;
+                        $message = is_array($result) ? (string)($result['error'] ?? 'Unauthorized') : 'Unauthorized';
+                        Response::json(['error' => $message], $status);
                         return;
                     }
                 }
-                $h($request); return;
+                $h($request);
+                return;
             }
         }
         Response::json(['error'=>'Not Found'],404);
