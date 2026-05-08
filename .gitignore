@@ -1,0 +1,9 @@
+.env
+backend/.env
+mobile/.dart_tool/
+mobile/build/
+mobile/.flutter-plugins*
+mobile/.packages
+vendor/
+backend/vendor/
+.DS_Store
