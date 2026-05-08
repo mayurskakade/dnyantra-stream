@@ -1,37 +1,13 @@
 <?php
 use App\Core\Response;
-use App\Services\AuthService;
+use App\Controllers\Api\AuthController;
 
-$auth = new AuthService();
+$authController = new AuthController();
 
-$router->post('/api/auth/login', function($request) use ($auth) {
-  $in = $request->input();
-  $email = filter_var($in['email'] ?? '', FILTER_VALIDATE_EMAIL);
-  $password = (string)($in['password'] ?? '');
-  if (!$email || $password === '') return Response::json(['error'=>'Invalid credentials payload'],422);
-  $result = $auth->login($email, $password);
-  if (!$result) return Response::json(['error'=>'Invalid credentials'],401);
-  return Response::json($result);
-});
-
-$router->post('/api/auth/refresh', function($request) use ($auth) {
-  $in = $request->input();
-  $result = $auth->refresh((string)($in['refresh_token'] ?? ''));
-  if (!$result) return Response::json(['error'=>'Invalid refresh token'],401);
-  return Response::json($result);
-});
-
-$router->post('/api/auth/logout', function($request) use ($auth) {
-  $in = $request->input();
-  $auth->logout((string)($in['refresh_token'] ?? ''));
-  return Response::json(['ok'=>true]);
-});
-
-$router->get('/api/me', function($request) use ($auth) {
-  $user = $auth->validateAccessToken($request->bearerToken());
-  if (!$user) return Response::json(['error'=>'Unauthorized'],401);
-  return Response::json(['id'=>$user['id'],'role'=>$user['role']]);
-});
+$router->post('/api/auth/login', fn($request)=>$authController->login($request));
+$router->post('/api/auth/refresh', fn($request)=>$authController->refresh($request));
+$router->post('/api/auth/logout', fn($request)=>$authController->logout($request));
+$router->get('/api/me', fn($request)=>$authController->me($request));
 
 $router->get('/api/home', fn()=>Response::json(['continue_watching'=>[],'featured'=>[]]));
 $router->get('/api/categories', fn()=>Response::json(['data'=>[]]));
