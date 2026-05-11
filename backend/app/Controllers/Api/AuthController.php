@@ -3,24 +3,39 @@ namespace App\Controllers\Api;
 
 use App\Core\Request;
 use App\Core\Response;
+use App\Core\Validator;
 use App\Services\AuthService;
 
 class AuthController {
-    public function __construct(private readonly AuthService $auth = new AuthService()) {}
+    public function __construct(
+        private readonly AuthService $auth = new AuthService(),
+        private readonly Validator $validator = new Validator(),
+    ) {}
 
     public function login(Request $request): void {
-        $in = $request->input();
-        $email = filter_var($in['email'] ?? '', FILTER_VALIDATE_EMAIL);
-        $password = (string)($in['password'] ?? '');
-        if (!$email || $password === '') { Response::json(['error'=>'Invalid credentials payload'],422); return; }
+        $in = $this->validator->validate($request->input(), [
+            'email' => 'required|email',
+            'password' => 'required|string|min:1',
+        ]);
+
+        $email = (string)$in['email'];
+        $password = (string)$in['password'];
         $result = $this->auth->login($email, $password);
-        if (!$result) { Response::json(['error'=>'Invalid credentials'],401); return; }
+        if (!$result) {
+            Response::json(['error' => ['code' => 'invalid_credentials', 'message' => 'Invalid credentials']], 401);
+            return;
+        }
+
         Response::json($result);
     }
 
     public function refresh(Request $request): void {
         $result = $this->auth->refresh((string)($request->input()['refresh_token'] ?? ''));
-        if (!$result) { Response::json(['error'=>'Invalid refresh token'],401); return; }
+        if (!$result) {
+            Response::json(['error' => ['code' => 'invalid_credentials', 'message' => 'Invalid refresh token']], 401);
+            return;
+        }
+
         Response::json($result);
     }
 

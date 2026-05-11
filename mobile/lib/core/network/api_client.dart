@@ -196,16 +196,17 @@ Future<String?> _refreshAccessToken({
 
     final accessToken =
         _readString(source['access_token'] ?? source['accessToken']);
-    final newRefreshToken =
-        _readString(source['refresh_token'] ?? source['refreshToken']);
+    final rotatedRefreshToken =
+        _readString(source['refresh_token'] ?? source['refreshToken']) ??
+            refreshToken;
 
-    if (accessToken == null || newRefreshToken == null) {
+    if (accessToken == null || rotatedRefreshToken.isEmpty) {
       return null;
     }
 
     await tokenStorage.writeTokens(
       accessToken: accessToken,
-      refreshToken: newRefreshToken,
+      refreshToken: rotatedRefreshToken,
     );
     return accessToken;
   } on DioException {
