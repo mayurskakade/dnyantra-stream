@@ -24,7 +24,12 @@ class AuthService {
         $stmt->execute([hash('sha256', $refreshToken)]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$row) return null;
-        return ['access_token'=>$this->makeAccessToken((int)$row['user_id'], $row['role']),'expires_in'=>3600,'user'=>$this->publicUser($row)];
+        return [
+            'access_token'=>$this->makeAccessToken((int)$row['user_id'], $row['role']),
+            'refresh_token'=>$refreshToken,
+            'expires_in'=>3600,
+            'user'=>$this->publicUser($row),
+        ];
     }
 
     public function validateAccessToken(?string $token): ?array {
