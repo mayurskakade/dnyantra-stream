@@ -1,0 +1,17 @@
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: stream
+      MYSQL_USER: stream
+      MYSQL_PASSWORD: stream
+      MYSQL_ROOT_PASSWORD: root
+    ports: ["3307:3306"]
+    volumes:
+      - ./mysql-init:/docker-entrypoint-initdb.d
+  redis:
+    image: redis:7-alpine
+    ports: ["6380:6379"]
+  adminer:
+    image: adminer
+    ports: ["8081:8080"]
