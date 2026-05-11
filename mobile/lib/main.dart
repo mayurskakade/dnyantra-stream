@@ -58,10 +58,21 @@ class App extends ConsumerWidget {
               builder: (_) => const ProfileScreen(),
               settings: settings,
             );
-          case '/player':
+          case PlayerScreen.routeName:
             final args = settings.arguments;
-            if (args is Map) {
-              final payload = _asStringDynamicMap(args);
+            if (args is PlayerRouteArgs) {
+              return MaterialPageRoute<void>(
+                builder: (_) => PlayerScreen(
+                  playableId: args.playableId,
+                  playableType: args.playableType,
+                ),
+                settings: settings,
+              );
+            }
+
+            final argsMap = settings.arguments;
+            if (argsMap is Map) {
+              final payload = _asStringDynamicMap(argsMap);
               final playableId = _toInt(payload['playable_id']);
               if (playableId != null && playableId > 0) {
                 final playableType =
@@ -77,7 +88,6 @@ class App extends ConsumerWidget {
             }
             break;
         }
-
         return null;
       },
       home: auth.when(
