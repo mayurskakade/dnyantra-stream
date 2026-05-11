@@ -2,110 +2,125 @@
 namespace App\Services;
 
 use App\Core\Database;
-use DateInterval;
+use App\Exceptions\NotFoundException;
+use App\Exceptions\ValidationException;
+use App\Repositories\PlaybackSessionRepository;
+use App\Repositories\ShareLinkRepository;
+use App\Repositories\UserContentAccessRepository;
 use DateTimeImmutable;
 use PDO;
-use RuntimeException;
 
 class PlaybackService {
     public function __construct(
         private readonly AccessPolicyService $accessPolicyService = new AccessPolicyService(),
         private readonly CloudflareStreamService $cloudflareStreamService = new CloudflareStreamService(),
+        private readonly PlaybackSessionRepository $playbackSessionRepository = new PlaybackSessionRepository(),
+        private readonly ShareLinkRepository $shareLinkRepository = new ShareLinkRepository(),
+        private readonly UserContentAccessRepository $userContentAccessRepository = new UserContentAccessRepository(),
+        private readonly ?PDO $pdo = null,
     ) {}
 
     public function createSession(?array $user, string $playableType, int $playableId, ?string $shareToken): array {
         $normalizedType = strtolower(trim($playableType));
         if (!in_array($normalizedType, ['movie', 'episode'], true) || $playableId <= 0) {
-            throw new RuntimeException('Invalid playable payload', 422);
+            throw new ValidationException('Validation failed', [
+                'playable_type' => ['The field must be one of: movie, episode.'],
+                'playable_id' => ['The field must be a positive integer.'],
+            ]);
         }
 
-        $pdo = Database::pdo();
-        $resolvedUser = $this->resolveActiveUser($pdo, $user);
-        $playable = $this->loadPlayableWithMedia($pdo, $normalizedType, $playableId);
-        if (!$playable) {
-            throw new RuntimeException('Content not found', 404);
+        $resolvedUser = $this->resolveActiveUser($user);
+        $playable = $this->loadPlayableWithMedia($normalizedType, $playableId);
+        if ($playable === null) {
+            throw new NotFoundException('Playable not found');
         }
 
-        if (empty($playable['media_asset_id']) || empty($playable['provider_uid']) || ($playable['media_status'] ?? '') !== 'ready') {
-            throw new RuntimeException('Media not found', 404);
+        if (
+            empty($playable['media_asset_id'])
+            || empty($playable['provider_uid'])
+            || ($playable['media_status'] ?? '') !== 'ready'
+        ) {
+            throw new NotFoundException('Playback media is not ready');
         }
 
-        $shareToken = is_string($shareToken) && trim($shareToken) !== '' ? trim($shareToken) : null;
-        $shareLinkId = $this->resolveShareLinkId($pdo, $normalizedType, $playable, $shareToken);
-        $effectiveShareToken = $shareLinkId ? $shareToken : null;
+        $cleanShareToken = is_string($shareToken) && trim($shareToken) !== '' ? trim($shareToken) : null;
+        $shareLinkId = $this->resolveShareLinkId($normalizedType, $playable, $cleanShareToken);
+        $effectiveShareToken = $shareLinkId !== null ? $cleanShareToken : null;
 
         $contentForPolicy = [
-            'status' => $playable['status'],
-            'visibility' => $playable['visibility'],
-            'rights_status' => $playable['rights_status'],
-            'public_streaming_enabled' => (bool)$playable['public_streaming_enabled'],
-            'is_listed_publicly' => (bool)$playable['is_listed_publicly'],
-            'requires_authentication' => ($playable['visibility'] ?? 'private') === 'authenticated',
-            'share_enabled' => ($playable['visibility'] ?? 'private') === 'unlisted',
-            'public_starts_at' => $playable['public_starts_at'],
-            'public_ends_at' => $playable['public_ends_at'],
-            // AccessPolicyService currently checks these field names.
-            'public_from' => $playable['public_starts_at'],
-            'public_until' => $playable['public_ends_at'],
-            'assigned' => $this->isAssignedToUser($pdo, $resolvedUser, $normalizedType, $playable),
+            'status' => (string)($playable['status'] ?? 'draft'),
+            'visibility' => (string)($playable['visibility'] ?? 'private'),
+            'rights_status' => (string)($playable['rights_status'] ?? 'personal_only'),
+            'public_streaming_enabled' => (bool)($playable['public_streaming_enabled'] ?? false),
+            'is_listed_publicly' => (bool)($playable['is_listed_publicly'] ?? false),
+            'public_starts_at' => $playable['public_starts_at'] ?? null,
+            'public_ends_at' => $playable['public_ends_at'] ?? null,
+            'public_from' => $playable['public_starts_at'] ?? null,
+            'public_until' => $playable['public_ends_at'] ?? null,
+            'assigned' => $this->isAssignedToUser($resolvedUser, $normalizedType, $playable),
         ];
 
-        $canWatch = $this->accessPolicyService->canWatch(
+        $this->accessPolicyService->assertCanWatch(
             $resolvedUser,
             $normalizedType,
             $playableId,
             $effectiveShareToken,
-            $contentForPolicy
+            $contentForPolicy,
         );
 
-        if (!$canWatch) {
-            throw new RuntimeException('Access denied', 403);
-        }
+        $expiresAt = time() + ($resolvedUser !== null ? 3600 : 1800);
+        $rawSessionToken = $this->base64UrlEncode(random_bytes(32));
+        $sessionTokenHash = hash('sha256', $rawSessionToken);
 
-        $expiresAt = (new DateTimeImmutable('now'))->add(new DateInterval($resolvedUser ? 'PT60M' : 'PT30M'));
-        $sessionToken = $this->base64UrlEncode(random_bytes(32));
-        $sessionTokenHash = hash('sha256', $sessionToken);
-
-        $insert = $pdo->prepare(
-            'INSERT INTO playback_sessions (
-                session_token_hash,
-                user_id,
-                share_link_id,
-                media_asset_id,
-                movie_id,
-                series_id,
-                episode_id,
-                expires_at,
-                ip_address,
-                user_agent,
-                created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
-        );
-
-        $insert->execute([
-            $sessionTokenHash,
-            $resolvedUser['id'] ?? null,
-            $shareLinkId,
-            (int)$playable['media_asset_id'],
-            $playable['movie_id'] ? (int)$playable['movie_id'] : null,
-            $playable['series_id'] ? (int)$playable['series_id'] : null,
-            $playable['episode_id'] ? (int)$playable['episode_id'] : null,
-            $expiresAt->format('Y-m-d H:i:s'),
-            $this->clientIp(),
-            $this->clientUserAgent(),
+        $sessionNumericId = $this->playbackSessionRepository->create([
+            'session_token_hash' => $sessionTokenHash,
+            'user_id' => $resolvedUser['id'] ?? null,
+            'share_link_id' => $shareLinkId,
+            'media_asset_id' => (int)$playable['media_asset_id'],
+            'movie_id' => $playable['movie_id'] !== null ? (int)$playable['movie_id'] : null,
+            'series_id' => $playable['series_id'] !== null ? (int)$playable['series_id'] : null,
+            'episode_id' => $playable['episode_id'] !== null ? (int)$playable['episode_id'] : null,
+            'expires_at' => gmdate('Y-m-d H:i:s', $expiresAt),
+            'ip_address' => $this->clientIp(),
+            'user_agent' => $this->clientUserAgent(),
         ]);
 
-        $sessionId = (int)$pdo->lastInsertId();
-        $signedToken = $this->cloudflareStreamService->createSignedPlaybackToken((string)$playable['provider_uid'], $expiresAt);
+        $signedToken = $this->cloudflareStreamService->createSignedPlaybackToken(
+            (string)$playable['provider_uid'],
+            $expiresAt,
+        );
 
         return [
-            'playback_url' => $this->cloudflareStreamService->getHlsManifestUrl((string)$playable['provider_uid'], $signedToken),
-            'expires_at' => $expiresAt->format(DATE_ATOM),
-            'session_id' => $sessionId,
+            'playback_url' => $this->cloudflareStreamService->getHlsManifestUrl(
+                (string)$playable['provider_uid'],
+                $signedToken,
+            ),
+            'expires_at' => $expiresAt,
+            'session_id' => $this->externalSessionId($sessionNumericId, $sessionTokenHash),
         ];
     }
 
-    private function loadPlayableWithMedia(PDO $pdo, string $playableType, int $playableId): ?array {
+    protected function resolveActiveUser(?array $user): ?array {
+        if (empty($user['id'])) {
+            return null;
+        }
+
+        $stmt = $this->pdo()->prepare('SELECT id, role, is_active FROM users WHERE id = ? LIMIT 1');
+        $stmt->execute([(int)$user['id']]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$row || !(bool)$row['is_active']) {
+            return null;
+        }
+
+        return [
+            'id' => (int)$row['id'],
+            'role' => (string)$row['role'],
+            'is_active' => (bool)$row['is_active'],
+        ];
+    }
+
+    protected function loadPlayableWithMedia(string $playableType, int $playableId): ?array {
         $sql = $playableType === 'movie'
             ? 'SELECT
                     m.id AS playable_id,
@@ -147,73 +162,37 @@ class PlaybackService {
                WHERE e.id = ?
                LIMIT 1';
 
-        $stmt = $pdo->prepare($sql);
+        $stmt = $this->pdo()->prepare($sql);
         $stmt->execute([$playableId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
         return $row ?: null;
     }
 
-    private function resolveActiveUser(PDO $pdo, ?array $user): ?array {
-        if (empty($user['id'])) {
-            return null;
-        }
-
-        $stmt = $pdo->prepare('SELECT id, role, is_active FROM users WHERE id = ? LIMIT 1');
-        $stmt->execute([(int)$user['id']]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$row || !(bool)$row['is_active']) {
-            return null;
-        }
-
-        return [
-            'id' => (int)$row['id'],
-            'role' => (string)$row['role'],
-            'is_active' => (bool)$row['is_active'],
-        ];
-    }
-
-    private function resolveShareLinkId(PDO $pdo, string $playableType, array $playable, ?string $shareToken): ?int {
+    protected function resolveShareLinkId(string $playableType, array $playable, ?string $shareToken): ?int {
         if ($shareToken === null) {
             return null;
         }
 
-        $hashed = hash('sha256', $shareToken);
-
-        if ($playableType === 'movie') {
-            $stmt = $pdo->prepare(
-                'SELECT id
-                 FROM share_links
-                 WHERE token_hash = ?
-                   AND movie_id = ?
-                   AND is_active = 1
-                   AND revoked_at IS NULL
-                   AND (expires_at IS NULL OR expires_at > NOW())
-                   AND (max_uses IS NULL OR used_count < max_uses)
-                 LIMIT 1'
-            );
-            $stmt->execute([$hashed, (int)$playable['movie_id']]);
-        } else {
-            $stmt = $pdo->prepare(
-                'SELECT id
-                 FROM share_links
-                 WHERE token_hash = ?
-                   AND (episode_id = ? OR series_id = ?)
-                   AND is_active = 1
-                   AND revoked_at IS NULL
-                   AND (expires_at IS NULL OR expires_at > NOW())
-                   AND (max_uses IS NULL OR used_count < max_uses)
-                 LIMIT 1'
-            );
-            $stmt->execute([$hashed, (int)$playable['episode_id'], (int)$playable['series_id']]);
+        $row = $this->shareLinkRepository->findByTokenHash(hash('sha256', $shareToken));
+        if (!$row) {
+            return null;
         }
 
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($playableType === 'movie') {
+            if ((int)($row['movie_id'] ?? 0) !== (int)($playable['movie_id'] ?? 0)) {
+                return null;
+            }
 
-        return $row ? (int)$row['id'] : null;
+            return (int)$row['id'];
+        }
+
+        $episodeMatch = (int)($row['episode_id'] ?? 0) === (int)($playable['episode_id'] ?? 0);
+        $seriesMatch = (int)($row['series_id'] ?? 0) === (int)($playable['series_id'] ?? 0);
+        return ($episodeMatch || $seriesMatch) ? (int)$row['id'] : null;
     }
 
-    private function isAssignedToUser(PDO $pdo, ?array $user, string $playableType, array $playable): bool {
+    protected function isAssignedToUser(?array $user, string $playableType, array $playable): bool {
         if (empty($user['id'])) {
             return false;
         }
@@ -223,28 +202,27 @@ class PlaybackService {
         }
 
         if ($playableType === 'movie') {
-            $stmt = $pdo->prepare(
-                'SELECT 1
-                 FROM user_content_access
-                 WHERE user_id = ?
-                   AND movie_id = ?
-                   AND (expires_at IS NULL OR expires_at > NOW())
-                 LIMIT 1'
+            return $this->userContentAccessRepository->hasActiveAccess(
+                (int)$user['id'],
+                'movie',
+                (int)$playable['movie_id'],
             );
-            $stmt->execute([(int)$user['id'], (int)$playable['movie_id']]);
-        } else {
-            $stmt = $pdo->prepare(
-                'SELECT 1
-                 FROM user_content_access
-                 WHERE user_id = ?
-                   AND (episode_id = ? OR series_id = ?)
-                   AND (expires_at IS NULL OR expires_at > NOW())
-                 LIMIT 1'
-            );
-            $stmt->execute([(int)$user['id'], (int)$playable['episode_id'], (int)$playable['series_id']]);
         }
 
-        return (bool)$stmt->fetchColumn();
+        $episodeId = (int)($playable['episode_id'] ?? 0);
+        $seriesId = (int)($playable['series_id'] ?? 0);
+
+        if ($episodeId > 0 && $this->userContentAccessRepository->hasActiveAccess((int)$user['id'], 'episode', $episodeId)) {
+            return true;
+        }
+
+        return $seriesId > 0
+            && $this->userContentAccessRepository->hasActiveAccess((int)$user['id'], 'series', $seriesId);
+    }
+
+    private function externalSessionId(int $sessionNumericId, string $sessionTokenHash): string {
+        $prefix = substr($sessionTokenHash, 0, 12);
+        return $sessionNumericId . '-' . $prefix;
     }
 
     private function clientIp(): ?string {
@@ -255,6 +233,10 @@ class PlaybackService {
     private function clientUserAgent(): ?string {
         $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? null;
         return is_string($userAgent) && $userAgent !== '' ? substr($userAgent, 0, 255) : null;
+    }
+
+    private function pdo(): PDO {
+        return $this->pdo ?? Database::pdo();
     }
 
     private function base64UrlEncode(string $data): string {

@@ -3,67 +3,73 @@ namespace App\Controllers\Api;
 
 use App\Core\Request;
 use App\Core\Response;
+use App\Core\Validator;
+use App\Exceptions\AuthorizationException;
+use App\Exceptions\ValidationException;
 use App\Services\PlaybackService;
-use RuntimeException;
+use App\Services\RateLimiter;
+use App\Services\RateLimiterFactory;
 
 class PlaybackController {
-    public function __construct(private readonly PlaybackService $playbackService = new PlaybackService()) {}
+    private RateLimiter $rateLimiter;
+
+    public function __construct(
+        private readonly PlaybackService $playbackService = new PlaybackService(),
+        private readonly Validator $validator = new Validator(),
+        ?RateLimiter $rateLimiter = null,
+    ) {
+        $this->rateLimiter = $rateLimiter ?? RateLimiterFactory::create();
+    }
 
     public function create(Request $request): void {
         $this->createForRequest($request, $request->attribute('auth_user'));
     }
 
     public function createPublic(Request $request): void {
+        if ($this->isRateLimited('public:playback-sessions', 20, 300)) {
+            return;
+        }
+
         $this->createForRequest($request, null);
     }
 
     private function createForRequest(Request $request, ?array $user): void {
-        $input = $request->input();
+        $input = $this->validator->validate($request->input(), [
+            'playable_type' => 'required|string|enum:movie,episode',
+            'playable_id' => 'required|int|min:1',
+        ]);
 
-        $playableType = strtolower(trim((string)($input['playable_type'] ?? '')));
-        $playableIdRaw = $input['playable_id'] ?? null;
-        $shareTokenRaw = $input['share_token'] ?? null;
-
-        if (!in_array($playableType, ['movie', 'episode'], true)) {
-            Response::json(['error' => 'Invalid payload'], 422);
-            return;
-        }
-
-        if (filter_var($playableIdRaw, FILTER_VALIDATE_INT) === false || (int)$playableIdRaw <= 0) {
-            Response::json(['error' => 'Invalid payload'], 422);
-            return;
-        }
-
+        $shareTokenRaw = $request->input()['share_token'] ?? null;
         if ($shareTokenRaw !== null && !is_string($shareTokenRaw)) {
-            Response::json(['error' => 'Invalid payload'], 422);
-            return;
+            throw new ValidationException('Validation failed', [
+                'share_token' => ['The field must be a string.'],
+            ]);
         }
 
-        $shareToken = $shareTokenRaw !== null ? trim($shareTokenRaw) : null;
+        $shareToken = is_string($shareTokenRaw) ? trim($shareTokenRaw) : null;
         if ($shareToken === '') {
             $shareToken = null;
         }
 
-        try {
-            $result = $this->playbackService->createSession($user, $playableType, (int)$playableIdRaw, $shareToken);
-            Response::json($result);
-            return;
-        } catch (RuntimeException $e) {
-            $status = $e->getCode();
-            if ($status === 422) {
-                Response::json(['error' => 'Invalid payload'], 422);
-                return;
-            }
-            if ($status === 403) {
-                Response::json(['error' => 'Forbidden'], 403);
-                return;
-            }
-            if ($status === 404) {
-                Response::json(['error' => 'Not found'], 404);
-                return;
-            }
+        $result = $this->playbackService->createSession(
+            $user,
+            strtolower((string)$input['playable_type']),
+            (int)$input['playable_id'],
+            $shareToken,
+        );
 
-            Response::json(['error' => 'Unable to create playback session'], 500);
+        Response::json($result);
+    }
+
+    private function isRateLimited(string $scope, int $limit, int $windowSeconds): bool {
+        $ip = (string)($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+        $result = $this->rateLimiter->hit($scope . ':' . $ip, $limit, $windowSeconds);
+
+        if ($result->allowed) {
+            return false;
         }
+
+        header('Retry-After: ' . $result->retryAfterSeconds);
+        throw new AuthorizationException('Rate limit exceeded', 429, 'rate_limited');
     }
 }
