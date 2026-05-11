@@ -1,7 +1,8 @@
 <?php
 require __DIR__.'/../vendor/autoload.php';
 session_start();
-$dotenv = Dotenv\Dotenv::createImmutable(dirname(__DIR__)); $dotenv->safeLoad();
+$dotenv = Dotenv\Dotenv::createImmutable(dirname(__DIR__));
+$dotenv->safeLoad();
 
 $errorHandler = new App\Core\ErrorHandler();
 $errorHandler->register();
@@ -20,6 +21,22 @@ App\Config\Config::bootValidate([
     'API_ALLOWED_ORIGINS',
 ]);
 
-$request = new App\Core\Request(); $router = new App\Core\Router();
+$request = new App\Core\Request();
+$router = new App\Core\Router();
+
+// --- Agent 06: global admin middleware guard for non-login routes ---
+$adminSessionMiddleware = new App\Middleware\AdminSessionMiddleware();
+$csrfMiddleware = new App\Middleware\CsrfMiddleware();
+$path = $request->path();
+
+$isLoginRoute = $path === '/admin/login';
+if (!$isLoginRoute) {
+    $adminSessionMiddleware->handle($request);
+
+    if ($request->method() === 'POST') {
+        $csrfMiddleware->handle($request);
+    }
+}
+
 require __DIR__.'/../routes/admin.php';
 $router->dispatch($request);
