@@ -27,9 +27,9 @@ void main() {
     });
   });
 
-  group('PlaybackSessionModel parsing', () {
+  group('PlaybackSession parsing', () {
     test('parses backend playback session response', () {
-      final session = PlaybackSessionModel.fromJson(<String, dynamic>{
+      final session = PlaybackSession.fromJson(<String, dynamic>{
         'playback_url': 'https://stream.example.com/manifest.m3u8',
         'expires_at': '2030-01-01T00:00:00Z',
         'session_id': 'sess_abc123',
@@ -42,7 +42,7 @@ void main() {
 
     test('throws on missing playback_url and session_id', () {
       expect(
-        () => PlaybackSessionModel.fromJson(<String, dynamic>{
+        () => PlaybackSession.fromJson(<String, dynamic>{
           'expires_at': '2030-01-01T00:00:00Z',
         }),
         throwsFormatException,
