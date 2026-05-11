@@ -27,4 +27,5 @@ if ($cors->handle($request) === false) {
 }
 
 require __DIR__.'/../routes/api.php';
+require __DIR__.'/../routes/public.php';
 $router->dispatch($request);
