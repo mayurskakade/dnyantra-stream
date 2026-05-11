@@ -4,16 +4,29 @@ namespace App\Controllers\Api;
 use App\Core\Request;
 use App\Core\Response;
 use App\Services\PlaybackService;
+use App\Services\RateLimiter;
+use App\Services\RateLimiterFactory;
 use RuntimeException;
 
 class PlaybackController {
-    public function __construct(private readonly PlaybackService $playbackService = new PlaybackService()) {}
+    private RateLimiter $rateLimiter;
+
+    public function __construct(
+        private readonly PlaybackService $playbackService = new PlaybackService(),
+        ?RateLimiter $rateLimiter = null,
+    ) {
+        $this->rateLimiter = $rateLimiter ?? RateLimiterFactory::create();
+    }
 
     public function create(Request $request): void {
         $this->createForRequest($request, $request->attribute('auth_user'));
     }
 
     public function createPublic(Request $request): void {
+        if ($this->isRateLimited('public:playback-sessions', 20, 300)) {
+            return;
+        }
+
         $this->createForRequest($request, null);
     }
 
@@ -65,5 +78,18 @@ class PlaybackController {
 
             Response::json(['error' => 'Unable to create playback session'], 500);
         }
+    }
+
+    private function isRateLimited(string $scope, int $limit, int $windowSeconds): bool {
+        $ip = (string)($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+        $result = $this->rateLimiter->hit($scope . ':' . $ip, $limit, $windowSeconds);
+
+        if ($result->allowed) {
+            return false;
+        }
+
+        header('Retry-After: ' . $result->retryAfterSeconds);
+        Response::json(['error' => 'Too many requests'], 429);
+        return true;
     }
 }
