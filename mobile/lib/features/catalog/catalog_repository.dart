@@ -1,104 +1,103 @@
 import 'package:dio/dio.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'models.dart';
+import '../../core/network/api_client.dart';
+import '../home/home_models.dart';
+import 'catalog_models.dart';
+
+final catalogRepositoryProvider = Provider<CatalogRepository>((ref) {
+  final dio = ref.watch(apiDioProvider);
+  return CatalogRepository(dio);
+});
 
 class CatalogRepository {
   CatalogRepository(this._dio);
 
   final Dio _dio;
 
-  Future<CatalogData> fetchCatalog() async {
-    Object? firstError;
-
-    final categoriesResult =
-        await _fetchList('/api/categories', fallbackKey: 'categories');
-    if (categoriesResult.error != null) {
-      firstError ??= categoriesResult.error;
-    }
-
-    final genresResult = await _fetchList('/api/genres', fallbackKey: 'genres');
-    if (genresResult.error != null) {
-      firstError ??= genresResult.error;
-    }
-
-    var categories = categoriesResult.items;
-    var genres = genresResult.items;
-
-    if (categories.isEmpty || genres.isEmpty) {
-      final homeFallback = await _fetchHomeFallback();
-      if (categories.isEmpty) {
-        categories = homeFallback.categories;
-      }
-      if (genres.isEmpty) {
-        genres = homeFallback.genres;
-      }
-    }
-
-    if (categories.isEmpty && genres.isEmpty && firstError != null) {
-      throw firstError;
-    }
-
-    return CatalogData(categories: categories, genres: genres);
-  }
-
-  Future<_ParsedListResult> _fetchList(
-    String path, {
-    required String fallbackKey,
+  Future<PaginatedResult<Movie>> listMovies({
+    int page = 1,
+    int perPage = 20,
   }) async {
-    try {
-      final response = await _dio.get<dynamic>(path);
-      final payload = _asMap(response.data);
-      final items = _extractItems(payload, fallbackKey);
-      return _ParsedListResult(items: items);
-    } on DioException catch (error) {
-      return _ParsedListResult(items: const <CatalogListItem>[], error: error);
-    }
+    final response = await _dio.get<dynamic>(
+      '/api/movies',
+      queryParameters: <String, dynamic>{
+        'page': page,
+        'per_page': perPage,
+      },
+    );
+
+    return _parsePaginated(response.data, Movie.fromJson,
+        fallbackPage: page, fallbackPerPage: perPage);
   }
 
-  Future<CatalogData> _fetchHomeFallback() async {
-    try {
-      final response = await _dio.get<dynamic>('/api/home');
-      final payload = _asMap(response.data);
+  Future<PaginatedResult<Series>> listSeries({
+    int page = 1,
+    int perPage = 20,
+  }) async {
+    final response = await _dio.get<dynamic>(
+      '/api/series',
+      queryParameters: <String, dynamic>{
+        'page': page,
+        'per_page': perPage,
+      },
+    );
 
-      return CatalogData(
-        categories: _extractItems(payload, 'categories'),
-        genres: _extractItems(payload, 'genres'),
-      );
-    } on DioException {
-      return const CatalogData(
-          categories: <CatalogListItem>[], genres: <CatalogListItem>[]);
-    }
+    return _parsePaginated(response.data, Series.fromJson,
+        fallbackPage: page, fallbackPerPage: perPage);
   }
 
-  List<CatalogListItem> _extractItems(
-    Map<String, dynamic> payload,
-    String key,
-  ) {
-    final candidates = <dynamic>[
-      payload['data'],
-      payload[key],
-      payload['items'],
-      payload['results'],
-      _asMap(payload['data'])[key],
-      _asMap(payload['data'])['items'],
-    ];
-
-    for (final candidate in candidates) {
-      final list = _asList(candidate);
-      if (list.isNotEmpty) {
-        return list.map(CatalogListItem.fromDynamic).toList(growable: false);
-      }
-    }
-
-    return const <CatalogListItem>[];
+  Future<Movie> getMovie(String slug) async {
+    final response = await _dio.get<dynamic>('/api/movies/$slug');
+    return Movie.fromJson(response.data);
   }
-}
 
-class _ParsedListResult {
-  const _ParsedListResult({required this.items, this.error});
+  Future<Series> getSeries(String slug) async {
+    final response = await _dio.get<dynamic>('/api/series/$slug');
+    return Series.fromJson(response.data);
+  }
 
-  final List<CatalogListItem> items;
-  final Object? error;
+  Future<List<Episode>> listEpisodes(int seasonId) async {
+    final response = await _dio.get<dynamic>('/api/seasons/$seasonId/episodes');
+    final payload = _asMap(response.data);
+    final list = _asList(payload['data']);
+    return list.map(Episode.fromJson).toList(growable: false);
+  }
+
+  Future<List<ContinueWatchingItem>> listContinueWatching() async {
+    final response = await _dio.get<dynamic>('/api/continue-watching');
+    final payload = _asMap(response.data);
+    final rootList = _asList(payload['data']);
+    final fallbackList = _asList(payload['continue_watching']);
+    final items = rootList.isNotEmpty ? rootList : fallbackList;
+
+    return items
+        .map(ContinueWatchingItem.fromJson)
+        .toList(growable: false)
+        .where((item) => item.playableId > 0)
+        .toList(growable: false);
+  }
+
+  PaginatedResult<T> _parsePaginated<T>(
+    dynamic data,
+    T Function(dynamic value) mapper, {
+    required int fallbackPage,
+    required int fallbackPerPage,
+  }) {
+    final payload = _asMap(data);
+    final list = _asList(payload['data']).map(mapper).toList(growable: false);
+
+    final page = _readInt(payload, const ['page']) ?? fallbackPage;
+    final perPage = _readInt(payload, const ['per_page']) ?? fallbackPerPage;
+    final total = _readInt(payload, const ['total']) ?? 0;
+
+    return PaginatedResult<T>(
+      items: list,
+      page: page,
+      perPage: perPage,
+      total: total,
+    );
+  }
 }
 
 Map<String, dynamic> _asMap(dynamic value) {
@@ -116,4 +115,23 @@ List<dynamic> _asList(dynamic value) {
     return value;
   }
   return const <dynamic>[];
+}
+
+int? _readInt(Map<String, dynamic> source, List<String> keys) {
+  for (final key in keys) {
+    final value = source[key];
+    if (value is int) {
+      return value;
+    }
+    if (value is num) {
+      return value.toInt();
+    }
+    if (value is String) {
+      final parsed = int.tryParse(value);
+      if (parsed != null) {
+        return parsed;
+      }
+    }
+  }
+  return null;
 }
