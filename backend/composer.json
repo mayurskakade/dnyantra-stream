@@ -6,6 +6,7 @@
     "vlucas/phpdotenv": "^5.6"
   },
   "require-dev": {
+    "friendsofphp/php-cs-fixer": "^3.64",
     "phpunit/phpunit": "^11.0"
   },
   "autoload": {
@@ -19,7 +20,10 @@
     }
   },
   "scripts": {
-    "test": "phpunit --testdox",
+    "test": "vendor/bin/phpunit",
+    "test:feature": "vendor/bin/phpunit --testsuite=Feature",
+    "lint": "vendor/bin/php-cs-fixer fix --dry-run --diff",
+    "fix": "vendor/bin/php-cs-fixer fix",
     "migrate": "php scripts/migrate.php",
     "seed": "php scripts/seed.php"
   }
