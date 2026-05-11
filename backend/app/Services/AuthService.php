@@ -99,6 +99,21 @@ class AuthService {
         return ['id'=>(int)$payload['sub'], 'role'=>$payload['role'] ?? 'viewer'];
     }
 
+    public function getUserById(int $userId): ?array {
+        if ($userId <= 0) {
+            return null;
+        }
+
+        $stmt = $this->pdo()->prepare('SELECT id, name, email, role, is_active FROM users WHERE id = ? LIMIT 1');
+        $stmt->execute([$userId]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$user || (int)($user['is_active'] ?? 0) !== 1) {
+            return null;
+        }
+
+        return $this->publicUser($user);
+    }
+
     public function logout(string $refreshToken): void {
         $this->pdo()->prepare('UPDATE refresh_tokens SET revoked_at = ? WHERE token_hash = ?')->execute([$this->now(), hash('sha256', $refreshToken)]);
     }

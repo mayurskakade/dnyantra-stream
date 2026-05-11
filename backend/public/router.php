@@ -7,4 +7,9 @@ if (PHP_SAPI === 'cli-server') {
         return false;
     }
 }
+if (str_starts_with(parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/', '/admin')) {
+    require __DIR__ . '/admin.php';
+    return;
+}
+
 require __DIR__ . '/index.php';
