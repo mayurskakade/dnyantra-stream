@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/network/api_client.dart';
+import 'home_models.dart';
 import 'home_repository.dart';
 
 final homeRepositoryProvider = Provider<HomeRepository>((ref) {
