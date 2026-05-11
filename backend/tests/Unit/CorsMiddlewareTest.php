@@ -28,6 +28,13 @@ final class CorsMiddlewareTest extends TestCase
 
         $this->assertFalse($result);
         $this->assertSame(204, http_response_code());
+
+        if (function_exists('xdebug_get_headers')) {
+            $headers = xdebug_get_headers();
+            $this->assertContains('Access-Control-Allow-Origin: https://app.example.com', $headers);
+            $this->assertContains('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS', $headers);
+            $this->assertContains('Access-Control-Allow-Headers: Authorization, Content-Type, X-CSRF-Token', $headers);
+        }
     }
 
     public function test_disallowed_preflight_is_blocked_with_403_json(): void
