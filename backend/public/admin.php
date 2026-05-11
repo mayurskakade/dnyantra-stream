@@ -37,6 +37,5 @@ if (!$isLoginRoute) {
         $csrfMiddleware->handle($request);
     }
 }
-
 require __DIR__.'/../routes/admin.php';
 $router->dispatch($request);

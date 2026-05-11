@@ -9,7 +9,7 @@ class UsersController extends BaseAdminController {
     public function __construct(?PDO $pdo = null) { parent::__construct($pdo); }
 
     public function index(Request $request): void {
-        $rows = $this->pdo()->query('SELECT id, name, email, role, is_active, created_at FROM users ORDER BY id DESC LIMIT 200')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $rows = $this->fetchAll('SELECT id, name, email, role, is_active, created_at FROM users ORDER BY id DESC LIMIT 200');
         $this->renderPage('Users', 'users/index', ['items' => $rows]);
     }
 

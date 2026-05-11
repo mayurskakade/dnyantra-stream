@@ -9,7 +9,7 @@ class GenresController extends BaseAdminController {
     public function __construct(?PDO $pdo = null) { parent::__construct($pdo); }
 
     public function index(Request $request): void {
-        $rows = $this->pdo()->query('SELECT id, name, slug, sort_order, is_active FROM genres ORDER BY sort_order ASC, id DESC')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $rows = $this->fetchAll('SELECT id, name, slug, sort_order, is_active FROM genres ORDER BY sort_order ASC, id DESC');
         $this->renderPage('Genres', 'genres/index', ['items' => $rows]);
     }
 

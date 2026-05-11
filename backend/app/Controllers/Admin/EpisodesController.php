@@ -11,7 +11,7 @@ class EpisodesController extends BaseAdminController {
     }
 
     public function index(Request $request): void {
-        $rows = $this->pdo()->query('SELECT e.id, e.series_id, e.season_id, e.episode_number, e.title, e.status, e.visibility FROM episodes e ORDER BY e.id DESC LIMIT 200')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $rows = $this->fetchAll('SELECT e.id, e.series_id, e.season_id, e.episode_number, e.title, e.status, e.visibility FROM episodes e ORDER BY e.id DESC LIMIT 200');
         $this->renderPage('Episodes', 'episodes/index', ['items' => $rows]);
     }
 
