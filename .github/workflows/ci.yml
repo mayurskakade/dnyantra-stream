@@ -1,0 +1,136 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: dnyantra_test
+          MYSQL_USER: app
+          MYSQL_PASSWORD: app
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uapp -papp"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Create test env
+        run: |
+          cat > .env <<'ENVEOF'
+          DB_HOST=127.0.0.1
+          DB_PORT=3306
+          DB_DATABASE=dnyantra_test
+          DB_USERNAME=app
+          DB_PASSWORD=app
+          JWT_SECRET=test-secret
+          APP_KEY=test-secret
+          CLOUDFLARE_ACCOUNT_ID=test-account
+          CLOUDFLARE_STREAM_API_TOKEN=test-token
+          CLOUDFLARE_STREAM_SIGNING_KEY_PEM=test-key
+          R2_ACCOUNT_ID=test-r2
+          R2_ACCESS_KEY_ID=test-access
+          R2_SECRET_ACCESS_KEY=test-secret
+          R2_BUCKET=test-bucket
+          APP_URL=http://localhost
+          API_ALLOWED_ORIGINS=http://localhost
+          ENVEOF
+
+      - name: Run migrations
+        run: composer migrate
+
+      - name: Run tests
+        run: composer test
+
+      - name: Run lint
+        run: composer lint
+
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test
+
+  security:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fail on committed .env files
+        run: |
+          if git ls-files | grep -E '(^|/)\.env$'; then
+            echo "Committed .env file detected"
+            exit 1
+          fi
+
+      - name: SQL audit script
+        run: |
+          if [ ! -x backend/scripts/audit-sql.sh ]; then
+            echo "Missing backend/scripts/audit-sql.sh (expected from Agent-09)"
+            exit 1
+          fi
+          backend/scripts/audit-sql.sh
+
+      - name: Secrets audit script
+        run: |
+          if [ ! -x backend/scripts/audit-secrets.sh ]; then
+            echo "Missing backend/scripts/audit-secrets.sh (expected from Agent-09)"
+            exit 1
+          fi
+          backend/scripts/audit-secrets.sh

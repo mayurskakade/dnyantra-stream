@@ -1,4 +1,7 @@
 <?php
+
+declare(strict_types=1);
+
 namespace Tests\Feature;
 
 use App\Controllers\Api\CatalogController;
@@ -8,8 +11,10 @@ use App\Exceptions\NotFoundException;
 use App\Services\CatalogService;
 use PHPUnit\Framework\TestCase;
 
-class CatalogEndpointsTest extends TestCase {
-    protected function setUp(): void {
+class CatalogEndpointsTest extends TestCase
+{
+    protected function setUp(): void
+    {
         $_GET = [];
         $_POST = [];
         $_SERVER['REQUEST_METHOD'] = 'GET';
@@ -17,7 +22,8 @@ class CatalogEndpointsTest extends TestCase {
         http_response_code(200);
     }
 
-    public function test_list_movies_endpoint_returns_paginated_payload(): void {
+    public function test_list_movies_endpoint_returns_paginated_payload(): void
+    {
         $service = $this->createMock(CatalogService::class);
         $service->expects($this->once())
             ->method('listMovies')
@@ -45,7 +51,8 @@ class CatalogEndpointsTest extends TestCase {
         $this->assertSame('movie-1', $response['body']['data'][0]['slug']);
     }
 
-    public function test_private_movie_detail_maps_to_404_not_found_response(): void {
+    public function test_private_movie_detail_maps_to_404_not_found_response(): void
+    {
         $service = $this->createMock(CatalogService::class);
         $service->expects($this->once())
             ->method('getMovie')
@@ -65,7 +72,8 @@ class CatalogEndpointsTest extends TestCase {
         $this->assertSame('not_found', $response['body']['error']['code']);
     }
 
-    public function test_public_catalog_endpoint_returns_payload_shape(): void {
+    public function test_public_catalog_endpoint_returns_payload_shape(): void
+    {
         $service = $this->createMock(CatalogService::class);
         $service->expects($this->once())
             ->method('publicCatalog')
@@ -87,7 +95,8 @@ class CatalogEndpointsTest extends TestCase {
         $this->assertSame('public-movie', $response['body']['data'][0]['slug']);
     }
 
-    private function capture(callable $callback): array {
+    private function capture(callable $callback): array
+    {
         ob_start();
         $callback();
         $output = (string)ob_get_clean();
@@ -98,7 +107,8 @@ class CatalogEndpointsTest extends TestCase {
         ];
     }
 
-    private function captureWithErrorHandler(callable $callback): array {
+    private function captureWithErrorHandler(callable $callback): array
+    {
         $errorHandler = new ErrorHandler();
 
         ob_start();
