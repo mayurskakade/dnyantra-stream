@@ -11,7 +11,7 @@ class SeasonsController extends BaseAdminController {
     }
 
     public function index(Request $request): void {
-        $rows = $this->pdo()->query('SELECT se.id, se.series_id, se.season_number, se.title, s.title AS series_title FROM seasons se LEFT JOIN series s ON s.id = se.series_id ORDER BY se.id DESC LIMIT 200')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $rows = $this->fetchAll('SELECT se.id, se.series_id, se.season_number, se.title, s.title AS series_title FROM seasons se LEFT JOIN series s ON s.id = se.series_id ORDER BY se.id DESC LIMIT 200');
         $this->renderPage('Seasons', 'seasons/index', ['items' => $rows]);
     }
 

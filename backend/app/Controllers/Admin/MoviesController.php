@@ -11,7 +11,7 @@ class MoviesController extends BaseAdminController {
     }
 
     public function index(Request $request): void {
-        $rows = $this->pdo()->query('SELECT id, title, slug, status, visibility, rights_status, public_streaming_enabled, updated_at FROM movies ORDER BY id DESC LIMIT 200')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $rows = $this->fetchAll('SELECT id, title, slug, status, visibility, rights_status, public_streaming_enabled, updated_at FROM movies ORDER BY id DESC LIMIT 200');
         $this->renderPage('Movies', 'movies/index', ['items' => $rows]);
     }
 

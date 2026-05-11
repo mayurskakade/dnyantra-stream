@@ -30,6 +30,18 @@ abstract class BaseAdminController {
         return $this->pdo ?? Database::pdo();
     }
 
+    protected function fetchAll(string $sql, array $params = []): array {
+        $stmt = $this->pdo()->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    protected function fetchCount(string $sql, array $params = []): int {
+        $stmt = $this->pdo()->prepare($sql);
+        $stmt->execute($params);
+        return (int)($stmt->fetchColumn() ?: 0);
+    }
+
     protected function renderPage(string $title, string $template, array $data = [], int $status = 200): void {
         $content = View::render($template, $data);
         Response::view(View::render('layouts/admin', [

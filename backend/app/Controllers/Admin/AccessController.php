@@ -10,8 +10,8 @@ class AccessController extends BaseAdminController {
     public function __construct(?PDO $pdo = null) { parent::__construct($pdo); }
 
     public function index(Request $request): void {
-        $rows = $this->pdo()->query('SELECT id, user_id, movie_id, series_id, episode_id, access_type, expires_at, created_at FROM user_content_access ORDER BY id DESC LIMIT 200')->fetchAll(PDO::FETCH_ASSOC) ?: [];
-        $shares = $this->pdo()->query('SELECT id, token_hash, movie_id, series_id, episode_id, is_active, expires_at, max_uses, used_count FROM share_links ORDER BY id DESC LIMIT 100')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $rows = $this->fetchAll('SELECT id, user_id, movie_id, series_id, episode_id, access_type, expires_at, created_at FROM user_content_access ORDER BY id DESC LIMIT 200');
+        $shares = $this->fetchAll('SELECT id, token_hash, movie_id, series_id, episode_id, is_active, expires_at, max_uses, used_count FROM share_links ORDER BY id DESC LIMIT 100');
         $this->renderPage('Access Control', 'access/index', ['items' => $rows, 'share_links' => $shares]);
     }
 
